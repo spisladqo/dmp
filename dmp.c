@@ -55,7 +55,7 @@ static int dmp_map(struct dm_target* ti, struct bio* bio)
 		break;
 	}
 
-	submit_bio(bio->bi_rw, bio);
+	submit_bio(bio);
 
 	return DM_MAPIO_SUBMITTED;
 }
@@ -64,7 +64,7 @@ static int dmp_ctr(struct dm_target* ti, unsigned int argc, char** argv)
 {
 	dmp_target_t* dt;
 	sector_t start;
-	int err;
+	int error;
 
 	if (argc != 2) {
 		pr_err("Invalid number of arguments\n");
@@ -75,7 +75,7 @@ static int dmp_ctr(struct dm_target* ti, unsigned int argc, char** argv)
 	dt = kzalloc(sizeof(dmp_target_t), GFP_KERNEL);
 	if (!dt) {
 		pr_err("Cannot allocate memory for dt\n");
-		ti->err = "Cannot allocate memory for dt";
+		ti->error = "Cannot allocate memory for dt";
 		return -ENOMEM;
 	}
 
@@ -83,16 +83,16 @@ static int dmp_ctr(struct dm_target* ti, unsigned int argc, char** argv)
 	{
 		pr_err("Invalid device sector\n");
 		ti->error = "Invalid device sector";
-		free(dt);
+		kfree(dt);
 		return -EINVAL;
 	}
 
-	err = dm_get_device(ti, argv[0], dm_table_get_mode(ti->table), &(mdt->dev));
-	if (err) {
+	error = dm_get_device(ti, argv[0], dm_table_get_mode(ti->table), &(dt->dev));
+	if (error) {
 		pr_err("Device lookup failed\n");
 		ti->error = "Device lookup failed";
-		free(dt);
-		return err;
+		kfree(dt);
+		return error;
 	}
 
 	dt->start = start;
