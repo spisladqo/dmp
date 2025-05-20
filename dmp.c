@@ -101,13 +101,38 @@ static int dmp_ctr(struct dm_target* ti, unsigned int argc, char** argv)
 	return 0;
 }
 
+static void dmp_dtr(struct dm_target* ti)
+{
+	dmp_target_t* dt = ti->private;
+	dm_put_device(ti, dt->dev);
+	kfree(dt);
+}
+
 static struct target_type dmp_target = {
 	.name = "dmp_target",
 	.version = {1, 0, 0},
 	.module = THIS_MODULE,
 	.map = dmp_map,
 	.ctr = dmp_ctr,
+	.dtr = dmp_dtr
 };
+
+static int __init dmp_init(void)
+{
+	int result = dm_register_target(&dmp_target);
+	if (result) {
+		pr_err("Failed to register target: error %d\n", result);
+	}
+	return result;
+}
+
+static void __exit dmp_exit(void)
+{
+	dm_unregister_target(&dmp_target);
+}
+
+module_init(dmp_init);
+module_exit(dmp_exit);
 
 MODULE_AUTHOR("Vlasenco Daniel <vlasenko.daniil26@gmail.com>");
 MODULE_DESCRIPTION("Device-mapper-based module for device statistics collection");
