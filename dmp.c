@@ -15,12 +15,12 @@
 #define DM_MSG_PREFIX "dmp"
 
 typedef struct {
-	unsigned int read_num;
-	unsigned int write_num;
-	unsigned int op_num;
-	unsigned int avg_bsize_read;
-	unsigned int avg_bsize_write;
-	unsigned int avg_bsize;
+	unsigned long long rrq_bsize_total;
+	unsigned long long wrq_bsize_total;
+	unsigned long long rq_bsize_total;
+	unsigned int rrq_num;
+	unsigned int wrq_num;
+	unsigned int rq_num;
 } dmp_stat_t;
 
 static dmp_stat_t stats;
@@ -32,24 +32,34 @@ typedef struct {
 
 static int dmp_map(struct dm_target* ti, struct bio* bio)
 {
-	unsigned int bsize;
+	unsigned long long bsize;
+	unsigned long long avg_bsize;
 	dmp_target_t* dt;
 
 	dt = ti->private;
 	bsize = bio->bi_iter.bi_size;
 	bio->bi_bdev = dt->dev->bdev;
+	stats.rq_num++;
+	stats.rq_bsize_total = stats.rq_bsize_total + bsize;
 
-	stats.op_num++;
-	stats.avg_bsize = (stats.avg_bsize + bsize) / stats.op_num;
+	pr_info("Requests num: %u\n", stats.rq_num);
+	pr_info("Received bio with block of size: %llu\n", bsize);
+	pr_info("Total block size: %llu\n", stats.rq_bsize_total);
 
 	switch (bio_op(bio)) {
 	case REQ_OP_READ:
-		stats.read_num++;
-		stats.avg_bsize_read = (stats.avg_bsize_read + bsize) / stats.read_num;
+		stats.rrq_num++;
+		stats.rrq_bsize_total += bsize;
+		avg_bsize = stats.rrq_bsize_total / stats.rrq_num;
+		pr_info("Current read requests num: %u\n", stats.rrq_num);
+		pr_info("Current average read block size: %llu\n", avg_bsize);
 		break;
 	case REQ_OP_WRITE:
-		stats.write_num++;
-		stats.avg_bsize_write = (stats.avg_bsize_write + bsize) / stats.write_num;
+		stats.wrq_num++;
+		stats.wrq_bsize_total += bsize;
+		avg_bsize = stats.wrq_bsize_total / stats.wrq_num;
+		pr_info("Current write requests num: %u\n", stats.wrq_num);
+		pr_info("Current average write block size: %llu\n", avg_bsize);
 		break;
 	default:
 		break;
@@ -57,6 +67,7 @@ static int dmp_map(struct dm_target* ti, struct bio* bio)
 
 	submit_bio(bio);
 
+	pr_info("Bio submitted successfully\n");
 	return DM_MAPIO_SUBMITTED;
 }
 
@@ -123,12 +134,14 @@ static int __init dmp_init(void)
 	if (result) {
 		pr_err("Failed to register target: error %d\n", result);
 	}
+	pr_info("Initialized dmp module\n");
 	return result;
 }
 
 static void __exit dmp_exit(void)
 {
 	dm_unregister_target(&dmp_target);
+	pr_info("Exit dmp module\n");
 }
 
 module_init(dmp_init);
