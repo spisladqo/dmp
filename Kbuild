@@ -9,4 +9,6 @@ ccflags-y :=	-Wall								\
 				-Werror=format-security				\
 				-Werror=implicit-function-declaration
 
+dmp-y := dmp_driver.o dmp_sysfs.o
+
 obj-m := dmp.o

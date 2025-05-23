@@ -6,27 +6,14 @@
  */
 
 #include <linux/device-mapper.h>
-
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/bio.h>
 #include <linux/types.h>
+#include <linux/device-mapper.h>
+#include "dmp.h"
 
-#define DM_MSG_PREFIX "dmp"
-
-typedef struct {
-	unsigned long long rrq_bsize_total;
-	unsigned long long wrq_bsize_total;
-	unsigned long long rq_bsize_total;
-	unsigned int rrq_num;
-	unsigned int wrq_num;
-	unsigned int rq_num;
-} dmp_stats_t;
-
-typedef struct {
-	dmp_stats_t* stats;
-	struct dm_dev* dev;
-} dmp_dev_handle_t;
+dmp_dev_handle_t* dmp_dh_global;
 
 static int dmp_map(struct dm_target* ti, struct bio* bio)
 {
@@ -36,6 +23,7 @@ static int dmp_map(struct dm_target* ti, struct bio* bio)
 	dmp_dev_handle_t* dh;
 
 	dh = ti->private;
+	dmp_dh_global = dh;
 	stats = dh->stats;
 	bsize = bio->bi_iter.bi_size;
 	bio->bi_bdev = dh->dev->bdev;
@@ -108,6 +96,7 @@ static int dmp_ctr(struct dm_target* ti, unsigned int argc, char** argv)
 		goto fail;
 	}
 
+	dmp_dh_global = dh;
 	ti->private = dh;
 	pr_info("got device!\n");
 
@@ -125,6 +114,7 @@ static void dmp_dtr(struct dm_target* ti)
 	dmp_dev_handle_t* dh = ti->private;
 	dm_put_device(ti, dh->dev);
 	kfree(dh);
+	dmp_dh_global = NULL;
 }
 
 static struct target_type dmp_target = {
@@ -139,9 +129,15 @@ static struct target_type dmp_target = {
 static int __init dmp_init(void)
 {
 	int result = dm_register_target(&dmp_target);
+
 	if (result) {
 		pr_err("Failed to register target: error %d\n", result);
-		dm_unregister_target(&dmp_target);
+		return result;
+	}
+
+	result = dmp_sysfs_init();
+
+	if (result) {
 		return result;
 	}
 
@@ -151,6 +147,7 @@ static int __init dmp_init(void)
 
 static void __exit dmp_exit(void)
 {
+	dmp_sysfs_exit();
 	dm_unregister_target(&dmp_target);
 	pr_info("Exit dmp module\n");
 }
