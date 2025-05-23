@@ -23,16 +23,9 @@ static int dmp_map(struct dm_target* ti, struct bio* bio)
 	dmp_dev_handle_t* dh;
 
 	dh = ti->private;
-	dmp_dh_global = dh;
 	stats = dh->stats;
 	bsize = bio->bi_iter.bi_size;
 	bio->bi_bdev = dh->dev->bdev;
-	stats->rq_num++;
-	stats->rq_bsize_total = stats->rq_bsize_total + bsize;
-
-	pr_info("Requests num: %u\n", stats->rq_num);
-	pr_info("Received bio with block of size: %llu\n", bsize);
-	pr_info("Total block size: %llu\n", stats->rq_bsize_total);
 
 	switch (bio_op(bio)) {
 	case REQ_OP_READ:
@@ -55,40 +48,30 @@ static int dmp_map(struct dm_target* ti, struct bio* bio)
 
 	bio_set_dev(bio, dh->dev->bdev);
 
-	return DM_MAPIO_SUBMITTED;
+	return DM_MAPIO_REMAPPED;
 }
 
 static int dmp_ctr(struct dm_target* ti, unsigned int argc, char** argv)
 {
 	dmp_dev_handle_t* dh;
-	int error;
-
-	pr_info("argc: %u, argv[0]: %s\n", argc, argv[0]);
+	int error = -ENOMEM;
 
 	if (argc != 1) {
 		ti->error = "Invalid number of arguments";
-		error = -EINVAL;
-		goto fail;
+		return -EINVAL;
 	}
-
-	pr_info("allocating dh...\n");
 
 	dh = kzalloc(sizeof(dmp_dev_handle_t), GFP_KERNEL);
 	if (!dh) {
 		ti->error = "Cannot allocate memory for dmp device handle";
-		error = -ENOMEM;
-		goto fail;
+		goto fail_handle;
 	}
 
 	dh->stats = kzalloc(sizeof(dmp_stats_t), GFP_KERNEL);
 	if (!dh->stats) {
 		ti->error = "Cannot allocate memory for dh";
-		error = -ENOMEM;
-		goto fail_stats;
+		goto fail;
 	}
-
-	pr_info("dh allocated\n");
-	pr_info("getting device...\n");
 
 	error = dm_get_device(ti, argv[0], dm_table_get_mode(ti->table), &(dh->dev));
 	if (error) {
@@ -98,13 +81,12 @@ static int dmp_ctr(struct dm_target* ti, unsigned int argc, char** argv)
 
 	dmp_dh_global = dh;
 	ti->private = dh;
-	pr_info("got device!\n");
 
 	return 0;
 
-fail_stats:
-	kfree(dh->stats);
 fail:
+	kfree(dh->stats);
+fail_handle:
 	kfree(dh);
 	return error;
 }
@@ -138,6 +120,7 @@ static int __init dmp_init(void)
 	result = dmp_sysfs_init();
 
 	if (result) {
+		dm_unregister_target(&dmp_target);
 		return result;
 	}
 
