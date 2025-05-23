@@ -30,6 +30,10 @@ extern dmp_dev_handle_t* dmp_dh_global;
 
 int dmp_sysfs_init(void);
 void dmp_sysfs_exit(void);
-ssize_t dmp_sysfs_show(struct kobject *kobj, 
+ssize_t dmp_sysfs_show_rd(struct kobject *kobj,
+                struct kobj_attribute *attr, char *buf);
+ssize_t dmp_sysfs_show_wr(struct kobject *kobj,
+                struct kobj_attribute *attr, char *buf);
+ssize_t dmp_sysfs_show_all(struct kobject *kobj,
                 struct kobj_attribute *attr, char *buf);
 #endif // DMP_H
