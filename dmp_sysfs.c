@@ -16,6 +16,7 @@ ssize_t dmp_sysfs_show_rd(struct kobject *kobj,
 {
     unsigned long long bsize_avg;
     dmp_stats_t s;
+    int ret;
 
     if (!dmp_dh_global) {
         pr_err("Failed to show stats: device is unlinked\n");
@@ -24,14 +25,17 @@ ssize_t dmp_sysfs_show_rd(struct kobject *kobj,
 
 	s = *(dmp_dh_global->stats);
 
+    spin_lock(&s.lock_rd_stats);
     if (s.rrq_num != 0) {
         bsize_avg = s.rrq_bsize_total / s.rrq_num;
     } else {
         bsize_avg = 0;
     }
+    ret = sprintf(buf, "read:\n reqs: %u\n avg size: %llu\n",
+		s.rrq_num, bsize_avg);
+    spin_unlock(&s.lock_rd_stats);
 
-    return sprintf(buf, "read:\n reqs: %u\n avg size: %llu\n",
-		            s.rrq_num, bsize_avg);
+    return ret;
 }
 
 ssize_t dmp_sysfs_show_wr(struct kobject *kobj,
@@ -39,6 +43,7 @@ ssize_t dmp_sysfs_show_wr(struct kobject *kobj,
 {
     unsigned long long bsize_avg;
     dmp_stats_t s;
+    int ret;
 
     if (!dmp_dh_global) {
         pr_err("Failed to show stats: device is unlinked\n");
@@ -47,14 +52,17 @@ ssize_t dmp_sysfs_show_wr(struct kobject *kobj,
 
 	s = *(dmp_dh_global->stats);
 
+    spin_lock(&s.lock_wr_stats);
     if (s.wrq_num != 0) {
         bsize_avg = s.wrq_bsize_total / s.wrq_num;
     } else {
         bsize_avg = 0;
     }
+    ret = sprintf(buf, "write:\n reqs: %u\n avg size: %llu\n",
+        s.wrq_num, bsize_avg);
+    spin_unlock(&s.lock_wr_stats);
 
-    return sprintf(buf, "write:\n reqs: %u\n avg size: %llu\n",
-		            s.wrq_num, bsize_avg);
+    return ret;
 }
 
 ssize_t dmp_sysfs_show_all(struct kobject *kobj,
@@ -64,6 +72,7 @@ ssize_t dmp_sysfs_show_all(struct kobject *kobj,
     unsigned long long bsize_avg;
     unsigned rq_num;
     dmp_stats_t s;
+    int ret;
 
     if (!dmp_dh_global) {
         pr_err("Failed to show stats: device is unlinked\n");
@@ -72,6 +81,8 @@ ssize_t dmp_sysfs_show_all(struct kobject *kobj,
 
 	s = *(dmp_dh_global->stats);
 
+    spin_lock(&s.lock_rd_stats);
+    spin_lock(&s.lock_wr_stats);
     bsize_total = s.rrq_bsize_total + s.wrq_bsize_total;
     rq_num = s.rrq_num + s.wrq_num;
     if (rq_num != 0) {
@@ -79,9 +90,12 @@ ssize_t dmp_sysfs_show_all(struct kobject *kobj,
     } else {
         bsize_avg = 0;
     }
+    ret = sprintf(buf, "total:\n reqs: %u\n avg size: %llu\n",
+        rq_num, bsize_avg);
+    spin_unlock(&s.lock_wr_stats);
+    spin_unlock(&s.lock_rd_stats);
 
-    return sprintf(buf, "total:\n reqs: %u\n avg size: %llu\n",
-		            rq_num, bsize_avg);
+    return ret;
 }
 
 int dmp_sysfs_init(void) {

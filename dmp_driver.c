@@ -29,18 +29,18 @@ static int dmp_map(struct dm_target* ti, struct bio* bio)
 
 	switch (bio_op(bio)) {
 	case REQ_OP_READ:
+		spin_lock(&stats->lock_rd_stats);
 		stats->rrq_num++;
 		stats->rrq_bsize_total += bsize;
 		avg_bsize = stats->rrq_bsize_total / stats->rrq_num;
-		pr_info("Current read requests num: %u\n", stats->rrq_num);
-		pr_info("Current average read block size: %llu\n", avg_bsize);
+		spin_unlock(&stats->lock_rd_stats);
 		break;
 	case REQ_OP_WRITE:
+		spin_lock(&stats->lock_wr_stats);
 		stats->wrq_num++;
 		stats->wrq_bsize_total += bsize;
 		avg_bsize = stats->wrq_bsize_total / stats->wrq_num;
-		pr_info("Current write requests num: %u\n", stats->wrq_num);
-		pr_info("Current average write block size: %llu\n", avg_bsize);
+		spin_unlock(&stats->lock_wr_stats);
 		break;
 	default:
 		break;
@@ -78,6 +78,9 @@ static int dmp_ctr(struct dm_target* ti, unsigned int argc, char** argv)
 		ti->error = "Device lookup failed";
 		goto fail;
 	}
+
+	spin_lock_init(&dh->stats->lock_rd_stats);
+	spin_lock_init(&dh->stats->lock_wr_stats);
 
 	dmp_dh_global = dh;
 	ti->private = dh;

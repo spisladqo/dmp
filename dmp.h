@@ -9,16 +9,17 @@
 #define DMP_H
 
 #include <linux/kobject.h>
+#include <linux/spinlock.h>
 
 #define DM_MSG_PREFIX "dmp"
 
 typedef struct {
+	spinlock_t lock_rd_stats;
+	spinlock_t lock_wr_stats;
 	unsigned long long rrq_bsize_total;
 	unsigned long long wrq_bsize_total;
-	unsigned long long rq_bsize_total;
 	unsigned int rrq_num;
 	unsigned int wrq_num;
-	unsigned int rq_num;
 } dmp_stats_t;
 
 typedef struct {
