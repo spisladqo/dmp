@@ -6,14 +6,13 @@
  */
 
 #include <linux/device-mapper.h>
-#include <linux/module.h>
 #include <linux/init.h>
 #include <linux/bio.h>
 #include <linux/types.h>
 #include <linux/device-mapper.h>
 #include "dmp.h"
 
-dmp_dev_handle_t* dmp_dh_global;
+static struct kset *stats_kset;
 
 static int dmp_map(struct dm_target* ti, struct bio* bio)
 {
@@ -64,32 +63,28 @@ static int dmp_ctr(struct dm_target* ti, unsigned int argc, char** argv)
 	dh = kzalloc(sizeof(dmp_dev_handle_t), GFP_KERNEL);
 	if (!dh) {
 		ti->error = "Cannot allocate memory for dmp device handle";
-		goto fail_handle;
-	}
-
-	dh->stats = kzalloc(sizeof(dmp_stats_t), GFP_KERNEL);
-	if (!dh->stats) {
-		ti->error = "Cannot allocate memory for dh";
 		goto fail;
 	}
 
-	error = dm_get_device(ti, argv[0], dm_table_get_mode(ti->table), &(dh->dev));
+	error = dm_get_device(ti, argv[0], dm_table_get_mode(ti->table), &dh->dev);
 	if (error) {
 		ti->error = "Device lookup failed";
 		goto fail;
 	}
 
-	spin_lock_init(&dh->stats->lock_rd_stats);
-	spin_lock_init(&dh->stats->lock_wr_stats);
+	dh->stats = dmp_init_stats(dm_table_device_name(ti->table), stats_kset);
+	if (!dh->stats) {
+		ti->error = "Failed to initialize stats";
+		goto fail_stats;
+	}
 
-	dmp_dh_global = dh;
 	ti->private = dh;
 
 	return 0;
 
+fail_stats:
+	dm_put_device(ti, dh->dev);
 fail:
-	kfree(dh->stats);
-fail_handle:
 	kfree(dh);
 	return error;
 }
@@ -99,7 +94,6 @@ static void dmp_dtr(struct dm_target* ti)
 	dmp_dev_handle_t* dh = ti->private;
 	dm_put_device(ti, dh->dev);
 	kfree(dh);
-	dmp_dh_global = NULL;
 }
 
 static struct target_type dmp_target = {
@@ -113,29 +107,24 @@ static struct target_type dmp_target = {
 
 static int __init dmp_init(void)
 {
-	int result = dm_register_target(&dmp_target);
-
-	if (result) {
-		pr_err("Failed to register target: error %d\n", result);
-		return result;
+	int error = dm_register_target(&dmp_target);
+	if (error) {
+		return error;
 	}
 
-	result = dmp_sysfs_init();
-
-	if (result) {
+	stats_kset = kset_create_and_add("stat", NULL, &THIS_MODULE->mkobj.kobj);
+	if (!stats_kset) {
 		dm_unregister_target(&dmp_target);
-		return result;
+		return -ENOMEM;
 	}
 
-	pr_info("Initialized dmp module\n");
 	return 0;
 }
 
 static void __exit dmp_exit(void)
 {
-	dmp_sysfs_exit();
 	dm_unregister_target(&dmp_target);
-	pr_info("Exit dmp module\n");
+	kset_unregister(stats_kset);
 }
 
 module_init(dmp_init);

@@ -6,85 +6,81 @@
  */
 #include "dmp.h"
 
-static struct kobject* kobj;
-static struct kobj_attribute kobj_attr_rd = __ATTR(read_stat, 0444, dmp_sysfs_show_rd, NULL);
-static struct kobj_attribute kobj_attr_wr = __ATTR(write_stat, 0444, dmp_sysfs_show_wr, NULL);
-static struct kobj_attribute kobj_attr_all = __ATTR(total_stat, 0444, dmp_sysfs_show_all, NULL);
+typedef struct {
+	struct attribute attr;
+	ssize_t (*show) (dmp_stats_t *stats, char *buf);
+} stats_attr_t;
 
-ssize_t dmp_sysfs_show_rd(struct kobject *kobj,
-                struct kobj_attribute *attr, char *buf)
+static ssize_t stats_show(struct kobject *kobj, struct attribute *attr,
+			       char *buf)
+{
+	dmp_stats_t *stats = container_of(kobj, dmp_stats_t, kobj);
+	stats_attr_t *attribute = container_of(attr, stats_attr_t, attr);
+
+	if (!attribute->show) {
+		return -EIO;
+	}
+	return attribute->show(stats, buf);
+}
+
+static ssize_t stats_store(struct kobject *kobj, struct attribute *attr,
+				const char *buf, size_t len)
+{
+	return -EIO;
+}
+
+static const struct sysfs_ops stats_sysfs_ops = {
+	.show = stats_show,
+	.store = stats_store,
+};
+
+static ssize_t stats_rd_show(dmp_stats_t *stats, char *buf)
 {
     unsigned long long bsize_avg;
-    dmp_stats_t s;
     int ret;
 
-    if (!dmp_dh_global) {
-        pr_err("Failed to show stats: device is unlinked\n");
-        return -ENODEV;
-    }
-
-	s = *(dmp_dh_global->stats);
-
-    spin_lock(&s.lock_rd_stats);
-    if (s.rrq_num != 0) {
-        bsize_avg = s.rrq_bsize_total / s.rrq_num;
+    spin_lock(&stats->lock_rd_stats);
+    if (stats->rrq_num != 0) {
+        bsize_avg = stats->rrq_bsize_total / stats->rrq_num;
     } else {
         bsize_avg = 0;
     }
     ret = sprintf(buf, "read:\n reqs: %u\n avg size: %llu\n",
-		s.rrq_num, bsize_avg);
-    spin_unlock(&s.lock_rd_stats);
+		stats->rrq_num, bsize_avg);
+    spin_unlock(&stats->lock_rd_stats);
 
     return ret;
 }
 
-ssize_t dmp_sysfs_show_wr(struct kobject *kobj,
-                struct kobj_attribute *attr, char *buf)
+static ssize_t stats_wr_show(dmp_stats_t *stats, char *buf)
 {
     unsigned long long bsize_avg;
-    dmp_stats_t s;
     int ret;
 
-    if (!dmp_dh_global) {
-        pr_err("Failed to show stats: device is unlinked\n");
-        return -ENODEV;
-    }
-
-	s = *(dmp_dh_global->stats);
-
-    spin_lock(&s.lock_wr_stats);
-    if (s.wrq_num != 0) {
-        bsize_avg = s.wrq_bsize_total / s.wrq_num;
+    spin_lock(&stats->lock_wr_stats);
+    if (stats->wrq_num != 0) {
+        bsize_avg = stats->wrq_bsize_total / stats->wrq_num;
     } else {
         bsize_avg = 0;
     }
     ret = sprintf(buf, "write:\n reqs: %u\n avg size: %llu\n",
-        s.wrq_num, bsize_avg);
-    spin_unlock(&s.lock_wr_stats);
+        stats->wrq_num, bsize_avg);
+    spin_unlock(&stats->lock_wr_stats);
 
     return ret;
 }
 
-ssize_t dmp_sysfs_show_all(struct kobject *kobj,
-                struct kobj_attribute *attr, char *buf)
+static ssize_t stats_total_show(dmp_stats_t *stats, char *buf)
 {
     unsigned long long bsize_total;
     unsigned long long bsize_avg;
     unsigned rq_num;
-    dmp_stats_t s;
     int ret;
 
-    if (!dmp_dh_global) {
-        pr_err("Failed to show stats: device is unlinked\n");
-        return -ENODEV;
-    }
-
-	s = *(dmp_dh_global->stats);
-
-    spin_lock(&s.lock_rd_stats);
-    spin_lock(&s.lock_wr_stats);
-    bsize_total = s.rrq_bsize_total + s.wrq_bsize_total;
-    rq_num = s.rrq_num + s.wrq_num;
+    spin_lock(&stats->lock_rd_stats);
+    spin_lock(&stats->lock_wr_stats);
+    bsize_total = stats->rrq_bsize_total + stats->wrq_bsize_total;
+    rq_num = stats->rrq_num + stats->wrq_num;
     if (rq_num != 0) {
         bsize_avg = bsize_total / rq_num;
     } else {
@@ -92,50 +88,74 @@ ssize_t dmp_sysfs_show_all(struct kobject *kobj,
     }
     ret = sprintf(buf, "total:\n reqs: %u\n avg size: %llu\n",
         rq_num, bsize_avg);
-    spin_unlock(&s.lock_wr_stats);
-    spin_unlock(&s.lock_rd_stats);
+    spin_unlock(&stats->lock_wr_stats);
+    spin_unlock(&stats->lock_rd_stats);
 
     return ret;
 }
 
-int dmp_sysfs_init(void) {
-    int error = 0;
+static stats_attr_t kobj_attr_rd = __ATTR_RO(stats_rd);
+static stats_attr_t kobj_attr_wr = __ATTR_RO(stats_wr);
+static stats_attr_t kobj_attr_total = __ATTR_RO(stats_total);
 
-    kobj = kobject_create_and_add("dmp", kernel_kobj);
-    if (!kobj) {
-        pr_err("Failed to create kobject\n");
-        return -ENOMEM;
-    }
-    error = sysfs_create_file(kobj, &kobj_attr_rd.attr);
-    if (error) {
-        pr_err("Failed to create sysfs read stats file\n");
-        goto fail_rd;
-    }
-    error = sysfs_create_file(kobj, &kobj_attr_wr.attr);
-    if (error) {
-        pr_err("Failed to create sysfs write stats file\n");
-        goto fail_wr;
-    }
-    error = sysfs_create_file(kobj, &kobj_attr_all.attr);
-    if (error) {
-        pr_err("Failed to create sysfs total stats file\n");
-        goto fail_all;
-    }
 
-    return 0;
-
-fail_all:
-    sysfs_remove_file(kobj, &kobj_attr_wr.attr);
-fail_wr:
-    sysfs_remove_file(kobj, &kobj_attr_rd.attr);
-fail_rd:
-    kobject_put(kobj);
-    return error;
+static void stats_release(struct kobject *kobj)
+{
+	dmp_stats_t *stats = container_of(kobj, dmp_stats_t, kobj);
+	kfree(stats);
 }
 
-void dmp_sysfs_exit(void) {
-    sysfs_remove_file(kobj, &kobj_attr_rd.attr);
-    sysfs_remove_file(kobj, &kobj_attr_wr.attr);
-    sysfs_remove_file(kobj, &kobj_attr_all.attr);
-    kobject_put(kobj);
+static struct attribute *stats_attrs[] = {
+	&kobj_attr_rd.attr,
+	&kobj_attr_wr.attr,
+	&kobj_attr_total.attr,
+	NULL,
+};
+ATTRIBUTE_GROUPS(stats);
+
+static const struct kobj_type stats_type = {
+	.release = stats_release,
+	.sysfs_ops = &stats_sysfs_ops,
+	.default_groups = stats_groups,
+};
+
+dmp_stats_t *dmp_init_stats(const char *name, struct kset *kset) {
+    dmp_stats_t *stats;
+    int error;
+
+    stats = kzalloc(sizeof(dmp_stats_t), GFP_KERNEL);
+    if (!stats) {
+        return NULL;
+    }
+
+    stats->kobj.kset = kset;
+
+	spin_lock_init(&stats->lock_rd_stats);
+	spin_lock_init(&stats->lock_wr_stats);
+
+    error = kobject_init_and_add(&stats->kobj, &stats_type, NULL, "%s", name);
+    if (error) {
+        goto fail;
+    }
+
+    error = kobject_uevent(&stats->kobj, KOBJ_ADD);
+    if (error) {
+        goto fail;
+    }
+
+    return stats;
+
+fail:
+    kobject_put(&stats->kobj);
+    kfree(stats);
+    return NULL;
+}
+
+void dmp_free_stats(dmp_stats_t *stats) {
+    if (!stats) {
+        return;
+    }
+
+    kobject_put(&stats->kobj);
+    kfree(stats);
 }
